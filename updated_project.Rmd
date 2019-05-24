@@ -8,8 +8,8 @@ output: html_document
 
 ```{r}
 pacman::p_load(dplyr, tidyr, ggplot2, magrittr, stringr, mlr)
-#housing_data = read.csv("housing_dat_16_17.csv")
-housing_data = housing_dat_16_17
+housing_data = read.csv("housing_data_2016_2017.csv")
+
 ```
 
 ##Delete variables that we dont need
