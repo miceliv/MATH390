@@ -9,7 +9,6 @@ output: html_document
 ```{r}
 pacman::p_load(dplyr, tidyr, ggplot2, magrittr, stringr, mlr)
 housing_data = read.csv("housing_data_2016_2017.csv")
-
 ```
 
 ##Delete variables that we dont need
@@ -63,7 +62,7 @@ d %<>%
 ##Change variable type 
 ```{r}
 d %<>%
-  mutate( zip_code = as.factor(zip_code))%>%
+  mutate( full_address_or_zip_code = as.character(full_address_or_zip_code))%>%
   mutate( dining_room_type = as.factor(dining_room_type)) %>%
   mutate( fuel_type = as.factor(fuel_type)) %>%
   mutate( garage_exists = as.factor(garage_exists)) %>%
@@ -74,44 +73,52 @@ d %<>%
   mutate( num_floors_in_building = factor(num_floors_in_building, ordered = TRUE)) %>%
   mutate( kitchen_type = as.factor(kitchen_type)) %>%
   mutate( parking_charges = as.numeric(parking_charges)) %>%
-  mutate( listing_price_to_nearest_1000 = as.numeric(listing_price_to_nearest_1000)) 
+  mutate( listing_price_to_nearest_1000 = as.numeric(listing_price_to_nearest_1000))
+```
+
+
+```{r}
+pacman::p_load(ggmap)
+
+?register_google
+
+register_google(key = 'AIzaSyAA9F9nKHHRtmc2shoe4OHx24rFS4ZTjDA')
+
+d %<>%
+  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = geocode(full_address_or_zip_code)$lon )
+
+d %<>%
+  select(-c(zip_code, full_address_or_zip_code))
+
+
+  
 ```
 
 We are trying to predict `sale_price`. So let's section our dataset:
 
 ```{r}
+d1 = d
+d1 %<>%
+  mutate(sale_price = as.character(sale_price))
+
+d1 %<>%
+  mutate(sale_price = as.numeric(sale_price))
+
+str(d1$sale_price)
+  
+d = d1
+
 y = d$sale_price
-X = d
 
+real_d = subset(d, (!is.na(d[,14])))
+fake_d = subset(d, (is.na(d[,14])))
 
-X$full_address_or_zip_code = NULL
-table(housing_data$listing_price_to_nearest_1000)
-
-
-##Since we have zip code with too many factors we have to splid the data
-X %<>%
-  mutate(zip_code = as.character(zip_code))%<>%
-  mutate(zip_code = as.numeric(zip_code))
-
-
-X1 = X %>%
-  filter(zip_code > 11365)  
-
-X2 = X %>%
-  filter(zip_code < 11366)
-
-X1 = X1 %<>%
-  mutate(zip_code = factor(zip_code))
-
-X2 = X2 %<>%
-  mutate(zip_code = factor(zip_code))
 
 ```
 
 Let's first create a matrix with $p$ columns that represents missingness
 
 ```{r}
-##X1
 M = tbl_df(apply(is.na(X), 2, as.numeric))
 colnames(M) = paste("is_missing_", colnames(X), sep = "")
 head(M)
@@ -139,15 +146,37 @@ colSums(M)
 Now let's impute using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
 
 ```{r}
+train = sample(1 : nrow(real_d), nrow(real_d)*4/5)
+training_data = real_d[train, ]
+testing_data = real_d[-train, ]
+
+testing_data %<>%
+  mutate(sale_price = NA)
+
+X = rbind(training_data, testing_data, fake_d)
+
+sd(X$total_taxes, na.rm = TRUE)
+
+X %<>%
+  mutate(total_taxes = as.character(total_taxes)) 
+
+X %<>%
+  mutate(total_taxes = as.double(total_taxes)) %>%
+  mutate(total_taxes = as.numeric(total_taxes))
+
+table(X$total_taxes)
+
+X[,16][X[, 16] < 1000]
+
+
 pacman::p_load(missForest)
-X1imp = missForest(data.frame(X1), sampsize = rep(100, ncol(X1)))$ximp
-X2imp = missForest(data.frame(X2), sampsize = rep(60, ncol(X2)))$ximp
+Ximp = missForest(data.frame(X), sampsize = rep(170, ncol(X)))$ximp
+
 
 ```
 
 ```{r}
 XimpTotal = as.data.frame(rbind(X1imp, X2imp))
-str(X2)
 ```
 
 ```{r}
