@@ -35,34 +35,34 @@ housing_data %<>%
 
 d = housing_data
 
-D1= d%<>%
+d %<>%
   mutate(maintenance_cost = sjmisc::rec(maintenance_cost, rec = "NA = 0 ; else = copy")) %<>%
   mutate(common_charges = sjmisc::rec(common_charges, rec = "NA = 0 ; else = copy"))##recode from NA to 0.
 
 
 # combine maintaince cost and common charges
-D1%<>% 
+d %<>% 
   mutate( monthly_cost = common_charges + maintenance_cost)
 
-D1%<>%
+d %<>%
   mutate(monthly_cost = sjmisc::rec(monthly_cost, rec = "0 = NA ; else = copy"))
 
 ## Garage exists conver it to binary
 
-D1= d%<>%
+d %<>%
   mutate(garage_exists = sjmisc::rec(garage_exists, rec = "NA = 0 ; else = copy")) ##recode from NA to 0. 
 
-D1= D1%<>%
+d %<>%
   mutate(garage_exists = sjmisc::rec(garage_exists, rec = " eys = 1; UG = 1 ; Underground = 1; yes = 1 ; Yes = 1 ; else = copy")) ##recode from NA to 0.
 
-D1 %<>%
+d %<>%
   select(-c(maintenance_cost , common_charges, model_type , coop_condo))
 
 ```
 
 ##Change variable type 
 ```{r}
-D2= D1%<>%
+d %<>%
   mutate( zip_code = as.factor(zip_code))%>%
   mutate( dining_room_type = as.factor(dining_room_type)) %>%
   mutate( fuel_type = as.factor(fuel_type)) %>%
@@ -75,16 +75,13 @@ D2= D1%<>%
   mutate( kitchen_type = as.factor(kitchen_type)) %>%
   mutate( parking_charges = as.numeric(parking_charges)) %>%
   mutate( listing_price_to_nearest_1000 = as.numeric(listing_price_to_nearest_1000)) 
-
-
-str(D1)
 ```
 
 We are trying to predict `sale_price`. So let's section our dataset:
 
 ```{r}
-y = D2$sale_price
-X = D2
+y = d$sale_price
+X = d
 
 
 X$full_address_or_zip_code = NULL
@@ -174,7 +171,7 @@ finalproject %<>%
   select(-d$full_address_or_zip_code`)
 
 finalproject %<>%
-  mutate(full_address_or_zip_code = as.character(full_address_or_zip_code))
+  mutate(address = as.character(address))
 
 finalproject %<>%
   mutate(lat = geocode(full_address_or_zip_code)$lat, lon = geocode(full_address_or_zip_code)$lon )
