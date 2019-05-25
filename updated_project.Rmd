@@ -98,8 +98,16 @@ d %<>%
 We are trying to predict `sale_price`. So let's section our dataset:
 
 ```{r}
+
+####CREATE A COLUMN ID
+
+d %<>%
+  mutate(id = 1 : 2230)
+
+real_y = data.frame(d$id, d$sale_price)
+
 j = d %>%
-  select(total_taxes, sale_price)
+  select(total_taxes)
 
 d %<>%
   select(-c(total_taxes, sale_price))
@@ -110,13 +118,11 @@ d
 
 d[,1][d[, 1] < 1000] = NA ## number 1 is total taxes
 
-####CREATE A COLUMN ID
 
-d %<>%
-  mutate(id = 1 : 2230)
+
   
 
-real_y = data.frame(d$id, d$sale_price)
+
 
 real_d = subset(d, (!is.na(d[,2])))  ## sale price
 fake_d = subset(d, (is.na(d[,2])))
@@ -128,8 +134,8 @@ train_indices = sample(1 : nrow(real_d), nrow(real_d)*4/5)
 training_data = real_d[train_indices, ]
 testing_data = real_d[-train_indices, ]
 
-testing_data %<>%
-  mutate(sale_price = NA)
+#testing_data %<>%
+#  mutate(sale_price = NA)
 
 
 X = rbind(training_data, testing_data, fake_d)
@@ -171,13 +177,28 @@ Now let's impute using the package. we cannot fit RF models to the entire datase
 
 ```{r}
 pacman::p_load(missForest)
-Ximp = missForest(data.frame(X), ntree = 500, mtry = 21, sampsize = rep(172, ncol(X)))$ximp
+Ximp = missForest(data.frame(X), sampsize = rep(172, ncol(X)))$ximp
 ```
 
 
 ```{r}
-Xnew = data.frame(cbind(Ximp, M))
-linear_mod_impute_and_missing_dummies = lm(sale_price ~ ., data = Xnew)
+Ximp %<>%
+  arrange(id)
+
+Ximp
+real_y
+
+Xnew = data.frame(cbind(Ximp, M, real_y))
+
+Xnew
+
+Xnew %<>%
+  mutate(price = d.sale_price) %>%
+  select(-c(id, d.id, d.sale_price))
+  
+
+Xnew
+linear_mod_impute_and_missing_dummies = lm(price ~ ., data = Xnew)
 summary(linear_mod_impute_and_missing_dummies)
 
 ```
@@ -188,27 +209,12 @@ summary(linear_mod_impute_and_missing_dummies)
 Data = Xnew
 ### sale price is our imputed Y
 
+
 Data %<>%
-    select(-sale_price)
+  filter(!is.na(price))
 
 
-Data1 = Data
-
-Data1 %<>%
-  arrange(id)
-
-Data1 = cbind(real_y, Data1)
-
-Data1$d.id = NULL
-Data1$id = NULL
-
-
-
-Data1 %<>%
-  filter(!is.na(d.sale_price))
-
-
-Y = Data1$d.sale_price
+Y = Data$price
 
 Xtrain = Data[1:422, ]
 Xtest = Data[423:528, ]
@@ -223,7 +229,7 @@ dtest = cbind(Xtest, Ytest)
 Linear Regression
 
 ```{r}
-linear = lm(d.sale_price ~ ., data = Data1)## simple linear model
+linear = lm(price ~ ., data = Data)## simple linear model
 summary(linear)
 ```
 
