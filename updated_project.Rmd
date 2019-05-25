@@ -24,11 +24,11 @@ housing_data %<>%
 housing_data %<>%
   mutate(dogs_allowed = ifelse(substr(housing_data$dogs_allowed, 1, 3) == "yes", 1, 0)) %>%
   mutate(cats_allowed = ifelse(substr(housing_data$cats_allowed, 1, 3) == "yes", 1, 0)) %>%
-  mutate( pets_allowed = ifelse( cats_allowed + dogs_allowed > 0, 1, 0))
-
+  mutate( pets_allowed = ifelse( cats_allowed + dogs_allowed > 0, 1, 0)) %>%
+  mutate(coop_condo = factor(tolower(coop_condo)))
 
 housing_data %<>%
-  select(-c(dogs_allowed,cats_allowed))
+  select(-c(dogs_allowed,cats_allowed, fuel_type))
 
 d = housing_data
 
@@ -55,24 +55,27 @@ d %<>%
 d %<>%
   select(-c(maintenance_cost , common_charges, model_type))
 
+
+str(d)
+
 ```
 
 ##Change variable type 
 ```{r}
 d %<>%
-  mutate( full_address_or_zip_code = as.character(full_address_or_zip_code))%>%
   mutate( dining_room_type = as.factor(dining_room_type)) %>%
-  mutate( fuel_type = as.factor(fuel_type)) %>%
-  mutate( garage_exists = as.factor(garage_exists)) %>%
-  mutate( kitchen_type = as.factor(kitchen_type)) %>%
+  mutate(garage_exists = as.character(garage_exists)) %>%
+  mutate(garage_exists = as.numeric(garage_exists)) %>%
+  mutate( parking_charges = as.character(parking_charges)) %>%
   mutate( parking_charges = as.numeric(parking_charges)) %>%
-  mutate( listing_price_to_nearest_1000 = as.numeric(listing_price_to_nearest_1000)) %>%
-  mutate(num_bedrooms = factor(num_bedrooms, ordered = TRUE)) %>%
-  mutate(num_half_bathrooms = factor(num_half_bathrooms, ordered = TRUE)) %>%
-  mutate(num_full_bathrooms = factor(num_full_bathrooms, ordered = TRUE)) %>%
-  mutate(num_total_rooms = factor(num_total_rooms, ordered = TRUE)) %>%
-  mutate(num_floors_in_building = num_floors_in_building)
+  mutate(sale_price = as.character(sale_price)) %>%
+  mutate(sale_price = as.numeric(sale_price)) %>%
+  mutate(total_taxes = as.character(total_taxes)) %>%
+  mutate(total_taxes = as.numeric(total_taxes))
+  
+
 ```
+
 
 #Added latitude and longitude features using ggmap
 
@@ -95,18 +98,28 @@ d %<>%
 We are trying to predict `sale_price`. So let's section our dataset:
 
 ```{r}
-d %<>%
-  mutate(sale_price = as.character(sale_price))
+j = d %>%
+  select(total_taxes, sale_price)
 
 d %<>%
-  mutate(sale_price = as.numeric(sale_price))
+  select(-c(total_taxes, sale_price))
 
-y = d$sale_price
+d = cbind(j, d)
 
 d
 
-real_d = subset(d, (!is.na(d[,15])))  ## sale price
-fake_d = subset(d, (is.na(d[,15])))
+d[,1][d[, 1] < 1000] = NA ## number 1 is total taxes
+
+####CREATE A COLUMN ID
+
+d %<>%
+  mutate(id = 1 : 2230)
+  
+
+real_y = data.frame(d$id, d$sale_price)
+
+real_d = subset(d, (!is.na(d[,2])))  ## sale price
+fake_d = subset(d, (is.na(d[,2])))
 ```
 #Split the data that has y into train and test sets
 
@@ -119,19 +132,8 @@ testing_data %<>%
   mutate(sale_price = NA)
 
 
-
 X = rbind(training_data, testing_data, fake_d)
 
-X %<>%
-  mutate(total_taxes = as.character(total_taxes)) 
-
-X %<>%
-  mutate(total_taxes = as.double(total_taxes)) %>%
-  mutate(total_taxes = as.numeric(total_taxes))
-
-X
-
-X[,17][X[, 17] < 1000] = NA ## number 17 is total taxes
 
 table(X$total_taxes)
 
@@ -169,7 +171,7 @@ Now let's impute using the package. we cannot fit RF models to the entire datase
 
 ```{r}
 pacman::p_load(missForest)
-Ximp = missForest(data.frame(X), ntree = 500, mtry = 22, sampsize = rep(172, ncol(X)))$ximp
+Ximp = missForest(data.frame(X), ntree = 500, mtry = 21, sampsize = rep(172, ncol(X)))$ximp
 ```
 
 
@@ -184,78 +186,60 @@ summary(linear_mod_impute_and_missing_dummies)
 ### REMOVING MISSING Y SECTION
 ```{r}
 Data = Xnew
+### sale price is our imputed Y
 
 Data %<>%
-  select(-sale_price) %>%
-  mutate(price = y)
+    select(-sale_price)
 
-Data
 
-Data %<>%
-  filter(!is.na(price))
+Data1 = Data
 
-Y = Data$price
+Data1 %<>%
+  arrange(id)
+
+Data1 = cbind(real_y, Data1)
+
+Data1$d.id = NULL
+Data1$id = NULL
+
+
+
+Data1 %<>%
+  filter(!is.na(d.sale_price))
+
+
+Y = Data1$d.sale_price
 
 Xtrain = Data[1:422, ]
 Xtest = Data[423:528, ]
 
 Ytrain = Y[1:422]
 Ytest = Y[423:528]
+
+dtrain = cbind(Xtrain, Ytrain) ## combine x train with y train, x test with y test
+dtest = cbind(Xtest, Ytest)
 ```
 
 Linear Regression
 
 ```{r}
-summary(lm(price ~ ., data = Data)) ## simple linear model
-```
-
-
-```{r}
-summary(lm(price ~ .*., data = Data)) ## with single interactions
-```
-
-
-```{r}
-mod1 = lm(Ytrain ~ ., data = Tr)
-summary(mod1)
-```
-
-## VALIDATION
-```{r}
-pacman::p_load(mlr)
+linear = lm(d.sale_price ~ ., data = Data1)## simple linear model
+summary(linear)
 ```
 
 ```{r}
-set.seed(1989)
+yhat = predict(linear, Xtest)
 
-modeling_task = makeRegrTask(data = finalproject, target = "sale_price") #instantiate the task
-algorithm = makeLearner("regr.randomForest") #instantiate the OLS learner algorithm on the diamonds dataset and set y = price
-validation = makeResampleDesc("CV", iters = 5) #instantiate the 5-fold CV
-resample(algorithm, modeling_task, validation) #execute
+e = yhat - Ytest
 
-
+sqrt(sum(e^2) / 108)
 
 ```
 
-```{r}
-modeling_task = makeRegrTask(data = finalproject, target = "sale_price") #instantiate the task
-res = resample(algorithm, modeling_task, validation, measures = list(rmse)) #execute
-res
-mean(res$measures.test$rmse)
-sd(res$measures.test$rmse)
-
-```
- 
- 
 ```{r}
 #REGRESSION TREE
-pacman::p_load(tree)
 
-train = sample(1 : nrow(finalproject), nrow(finalproject)*4/5)
-test = - train
-trainig_data = finalproject[train, ]
-testing_data = finalproject[train, ]
+
 
 
 ```
- 
