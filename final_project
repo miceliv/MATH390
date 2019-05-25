@@ -71,9 +71,9 @@ d %<>%
   mutate(sale_price = as.character(sale_price)) %>%
   mutate(sale_price = as.numeric(sale_price)) %>%
   mutate(total_taxes = as.character(total_taxes)) %>%
-  mutate(total_taxes = as.numeric(total_taxes))
+  mutate(total_taxes = as.numeric(total_taxes)) %>%
+  mutate(price_persqft = listing_price_to_nearest_1000 / sq_footage)
   
-
 ```
 
 
@@ -81,15 +81,11 @@ d %<>%
 
 ```{r}
 #pacman::p_load(ggmap)
-
-
-#register_google(key = '#')
-
+#register_google(key = 'AIzaSyAA9F9nKHHRtmc2shoe4OHx24rFS4ZTjDA')
 #d %<>%
 #  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = #geocode(full_address_or_zip_code)$lon )
-
 d %<>%
-  select(-c(zip_code, full_address_or_zip_code))
+  select(-c(zip_code, full_address_or_zip_code, listing_price_to_nearest_1000))
 
 
   
