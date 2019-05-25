@@ -6,21 +6,20 @@ output:
   html_document: default
 Author: Juan D Astudillo, Vincent Miceli, Adriana Sham, Burhan Hanif, Sakib Salim
 ---
-
-## R Markdown
+#Load dependencies
 
 ```{r}
 pacman::p_load(dplyr, tidyr, ggplot2, magrittr, stringr, mlr)
 housing_data = read.csv("housing_data_2016_2017.csv")
 ```
 
-##Delete variables that we dont need
+#Delete variables that we dont need
 ```{r}
 housing_data %<>%
   select(-c(HITId, HITTypeId, Title, Description, Keywords, Reward, CreationTime, MaxAssignments,	RequesterAnnotation,	AssignmentDurationInSeconds,	AutoApprovalDelayInSeconds,	Expiration,	NumberOfSimilarHITs, LifetimeInSeconds,	AssignmentId,	WorkerId,	AssignmentStatus,	AcceptTime,	SubmitTime,	AutoApprovalTime,	ApprovalTime,	RejectionTime,	RequesterFeedback,	WorkTimeInSeconds, LifetimeApprovalRate,	Last30DaysApprovalRate,	Last7DaysApprovalRate, URL, url, date_of_sale))
 ```
 
-## Clean Data
+# Cleaning Data
 ```{r}
 #extract zip codes as a separate feature
 housing_data %<>%
@@ -59,11 +58,9 @@ d %<>%
 
 d %<>%
   select(-c(maintenance_cost , common_charges, model_type))
-
-#str(d)
 ```
 
-##Change variable type 
+#Change variable type 
 
 ```{r}
 d %<>%
@@ -72,6 +69,7 @@ d %<>%
   mutate(garage_exists = as.numeric(garage_exists)) %>%
   mutate( parking_charges = as.character(parking_charges)) %>%
   mutate( parking_charges = as.numeric(parking_charges)) %>%
+  
   #sale to numeric for regression
   mutate(sale_price = as.character(sale_price)) %>%
   mutate(sale_price = as.numeric(sale_price)) %>%
@@ -94,7 +92,6 @@ d %<>%
 
 #geocoordinates for relevant LIRR stations
 lirr_coord = read.csv("all_lirr_geocoordinates.csv")
-
 
 RAD_EARTH = 3958.8
 degrees_to_radians = function(angle_degrees){
@@ -135,120 +132,99 @@ d %<>%
   select(-c(zip_code, full_address_or_zip_code, listing_price_to_nearest_1000))
 ```
 
-We are trying to predict `sale_price`. So let's section our dataset:
+#We are trying to predict `sale_price`. So let's section our dataset:
 
 ```{r}
-
-####CREATE A COLUMN ID
-
 d %<>%
   ungroup(d) %>%
   mutate(id = 1 : 2230)
 
+d %<>%
+  mutate(total_taxes = ifelse(d$total_taxes < 1000, NA, total_taxes))
+
 real_y = data.frame(d$id, d$sale_price)
 
-j = d %>%
-  select(total_taxes)
+real_d = subset(d, (!is.na(d$sale_price)))
+fake_d = subset(d, (is.na(d$sale_price)))
 
-d %<>%
-  select(-c(total_taxes, sale_price))
-
-d = cbind(j, d)
-
-d[,1][d[, 1] < 1000] = NA ## number 1 is total taxes
-
-real_d = subset(d, (!is.na(d[,2])))  ## sale price
-fake_d = subset(d, (is.na(d[,2])))
+real_d$sale_price = NULL
+fake_d$sale_price = NULL
 ```
-#Split the data that has y into train and test sets
+
+#Split the data into train and test sets
 
 ```{r}
 train_indices = sample(1 : nrow(real_d), nrow(real_d)*4/5)
+test_indices = setdiff(1:nrow(real_d), train_indices)
 training_data = real_d[train_indices, ]
-testing_data = real_d[-train_indices, ]
+testing_data = real_d[test_indices, ]
 
 #testing_data %<>%
 #  mutate(sale_price = NA)
 
-
 X = rbind(training_data, testing_data, fake_d)
-
-
-#table(X$total_taxes)
-
-#str(X)
 ```
 
-Let's first create a matrix with $p$ columns that represents missingness
+#Create Missing Matrix
 
 ```{r}
 M = tbl_df(apply(is.na(X), 2, as.numeric))
 colnames(M) = paste("is_missing_", colnames(X), sep = "")
-# head(M)
-# summary(M)
-
 ```
 
-Some of these missing indicators are collinear because they share all the rows they are missing on. Let's filter those out:
+#Some of these missing indicators are collinear.
 
 ```{r}
 M = tbl_df(t(unique(t(M))))
 ```
 
 
-Some featuers did not have missingness so let's remove them:
+#Some featuress did not have missingness so let's remove them:
 
 ```{r}
 M %<>% select_if(function(x){sum(x) > 0})
-# head(M)
-# dim(M)
-# colSums(M)
-
 ```
 
-Now let's impute using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
+#Impute using missForest
 
 ```{r}
 pacman::p_load(missForest)
 Ximp = missForest(data.frame(X), sampsize = rep(172, ncol(X)))$ximp
 ```
 
+#Combine imputed X and M
 
 ```{r}
 Ximp %<>%
   arrange(id)
-
-
 Xnew = data.frame(cbind(Ximp, M, real_y))
 
 Xnew %<>%
   mutate(price = d.sale_price) %>%
   select(-c(id, d.id, d.sale_price))
-  
 
 linear_mod_impute_and_missing_dummies = lm(price ~ ., data = Xnew)
 summary(linear_mod_impute_and_missing_dummies)
-
 ```
 
 
-### REMOVING MISSING Y SECTION
+# Many observations are missing y values. We 
 ```{r}
 Data = Xnew
 ### sale price is our imputed Y
 
-
 Data %<>%
   filter(!is.na(price))
 
-
 Y = Data$price
 
-Xtrain = Data[1:422, ]
-Xtest = Data[423:528, ]
+Data$price = NULL
 
-Ytrain = Y[1:422]
-Ytest = Y[423:528]
+Xtrain = Data[train_indices, ]
+Xtest = Data[test_indices, ]
+
+Ytrain = Y[train_indices]
+Ytest = Y[test_indices]
 
 dtrain = cbind(Xtrain, Ytrain) ## combine x train with y train, x test with y test
 dtest = cbind(Xtest, Ytest)
@@ -257,20 +233,18 @@ dtest = cbind(Xtest, Ytest)
 Linear Regression
 
 ```{r}
-Xtrain$price = NULL
-Xtest$price = NULL
 linear = lm(Ytrain ~ ., data = Xtrain)## simple linear model
 summary(linear)
 ```
 
 
 ```{r}
-yhat = predict(linear, Xtest)
+yhat_test_lin = predict(linear, Xtest)
 
-e = yhat - Ytest
+e_lin = yhat_test_lin - Ytest
 
 #RMSE
-sqrt(sum(e^2) / 108)
+sqrt(sum(e_lin^2)/length(e_lin))
 ```
 
 ```{r}
@@ -278,11 +252,11 @@ sqrt(sum(e^2) / 108)
 pacman::p_load(YARF)
 reg_tree = YARFCART(Xtrain, Ytrain)
 y_hat_test_tree = predict(reg_tree, Xtest)
-e = Ytest - y_hat_test_tree
+e_tree = Ytest - y_hat_test_tree
 #RMSE
-sqrt(sum(e^2)/108)
+sqrt(sum(e^2)/length(e))
 sd(e)
-illustrate_trees(reg_tree, max_depth = 4, open_file = TRUE)
+#illustrate_trees(reg_tree, max_depth = 4, open_file = TRUE)
 ```
 
 
@@ -304,8 +278,8 @@ houses_test = Data[test_indices, ]
 ```
 
 
-Hyperparameter Tuning for Random Forest
-Running this chunk gives the optimal hyperparameters used in the model.
+#Hyperparameter Tuning for Random Forest
+#Running this chunk gives the optimal hyperparameters used in the RF model.
 
 ```{r}
 # train_task = makeRegrTask(data = houses_train, target = "price")
@@ -343,9 +317,9 @@ Running this chunk gives the optimal hyperparameters used in the model.
 rf_mod = YARF(Xtrain, Ytrain, mtry = 10, nodesize = 4)
 
 y_hat_test_tree = predict(rf_mod, Xtest)
-e = Ytest - y_hat_test_tree
+e_rf = Ytest - y_hat_test_tree
 #RMSE
-sqrt(sum(e^2)/108)
+sqrt(sum(e^2)/length(e))
 sd(e)
 ```
 
