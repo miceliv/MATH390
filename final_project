@@ -83,7 +83,7 @@ d %<>%
 #pacman::p_load(ggmap)
 
 
-#register_google(key = 'AIzaSyAA9F9nKHHRtmc2shoe4OHx24rFS4ZTjDA')
+#register_google(key = '#')
 
 #d %<>%
 #  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = #geocode(full_address_or_zip_code)$lon )
