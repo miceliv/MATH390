@@ -88,37 +88,37 @@ d %<>%
 #  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = #geocode(full_address_or_zip_code)$lon )
 #geocoordinates for relevant LIRR stations
 
-#lirr_coord = coord
-# RAD_EARTH = 3958.8
-# degrees_to_radians = function(angle_degrees){
-#   for(i in 1:length(angle_degrees))
-#     angle_degrees[i] = angle_degrees[i]*pi/180
-#   return(angle_degrees)
-# }
-# compute_globe_distance = function(destination, origin){
-#   destination_rad = degrees_to_radians(destination)
-#   origin_rad = degrees_to_radians(origin)
-#   delta_lat = destination_rad[1] - origin_rad[1]
-#   delta_lon = destination_rad[2] - origin_rad[2]
-#   h = (sin(delta_lat/2))^2 + cos(origin_rad[1]) * cos(destination_rad[1]) * (sin(delta_lon/2))^2
-#   central_angle = 2 * asin(sqrt(h))
-#   return(RAD_EARTH * central_angle)
-# }
-# #find the closest LIRR station and compute distance
-# shortest_lirr_distance = function(all_lirr_coords, house_coords){
-#   shortest_dist = Inf
-#   for (i in 1: nrow(all_lirr_coords)){
-#     ith_lirr = c(all_lirr_coords$lat[i], all_lirr_coords$lon[i])
-#     new_dist = compute_globe_distance(ith_lirr, house_coords)
-#     if( new_dist < shortest_dist){
-#       shortest_dist = new_dist
-#     }
-#   }
-#   return(shortest_dist)
-#}
-# d %<>%
-#   rowwise() %>%
-#   mutate(shortest_dist = shortest_lirr_distance(lirr_coord, c(lat, lon)) )
+lirr_coord = coord
+RAD_EARTH = 3958.8
+degrees_to_radians = function(angle_degrees){
+  for(i in 1:length(angle_degrees))
+    angle_degrees[i] = angle_degrees[i]*pi/180
+  return(angle_degrees)
+}
+compute_globe_distance = function(destination, origin){
+  destination_rad = degrees_to_radians(destination)
+  origin_rad = degrees_to_radians(origin)
+  delta_lat = destination_rad[1] - origin_rad[1]
+  delta_lon = destination_rad[2] - origin_rad[2]
+  h = (sin(delta_lat/2))^2 + cos(origin_rad[1]) * cos(destination_rad[1]) * (sin(delta_lon/2))^2
+  central_angle = 2 * asin(sqrt(h))
+  return(RAD_EARTH * central_angle)
+}
+#find the closest LIRR station and compute distance
+shortest_lirr_distance = function(all_lirr_coords, house_coords){
+  shortest_dist = Inf
+  for (i in 1: nrow(all_lirr_coords)){
+    ith_lirr = c(all_lirr_coords$lat[i], all_lirr_coords$lon[i])
+    new_dist = compute_globe_distance(ith_lirr, house_coords)
+    if( new_dist < shortest_dist){
+      shortest_dist = new_dist
+    }
+  }
+  return(shortest_dist)
+}
+d %<>%
+  rowwise() %>%
+  mutate(shortest_dist = shortest_lirr_distance(lirr_coord, c(lat, lon)) )
 #makes any other addresses redundant
 d %<>%
   select(-c(zip_code, full_address_or_zip_code, listing_price_to_nearest_1000))
@@ -147,10 +147,6 @@ fake_d$sale_price = NULL
 train_indices = sample(1 : nrow(real_d), nrow(real_d)*4/5)
 training_data = real_d[train_indices, ]
 testing_data = real_d[-train_indices, ]
-
-#testing_data %<>%
-#  mutate(sale_price = NA)
-
 
 X = rbind(training_data, testing_data, fake_d)
 ```
@@ -258,7 +254,10 @@ set.seed(1989)
 final_split1 <- initial_split(Data, prop = .7)
 final_train1 <- training(final_split1)
 final_test1  <- testing(final_split1)
+```
 
+
+```{r}
 m1 = rpart(
   formula = Ytrain ~ .,
   data    = Xtrain,
@@ -318,36 +317,7 @@ sqrt(sum(e^2)/106)
 m3$cptable
 
 ```
- 
-```{r}
-hyper_grid <- expand.grid(
-  minsplit = seq(5, 20, 1),
-  maxdepth = seq(8, 15, 1)
-)
 
-head(hyper_grid)
-nrow(hyper_grid)
-
-```
-
-```{r}
-models <- list()
-
-for (i in 1:nrow(hyper_grid)) {
-  
-  # get minsplit, maxdepth values at row i
-  minsplit <- hyper_grid$minsplit[i]
-  maxdepth <- hyper_grid$maxdepth[i]
-
-  # train a model and store in the list
-  models[[i]] <- rpart(
-    formula = Ytrain ~ .,
-    data    = Xtrain,
-    method  = "anova",
-    control = list(minsplit = minsplit, maxdepth = maxdepth)
-    )
-}
-```
 
 ```{r}
 # function to get optimal cp
@@ -374,32 +344,19 @@ hyper_grid %>%
 
 ```{r}
 optimal_tree <- rpart(
-    formula = Xtrain ~ .,
-    data    = Ytrain,
+    formula = Ytrain ~ .,
+    data    = Xtrain,
     method  = "anova",
     control = list(minsplit = 11, maxdepth = 8, cp = 0.01)
     )
 
-pred <- predict(optimal_tree, newdata = final_test1)
-RMSE(pred = pred, obs = final_test1$price)
+pred <- predict(optimal_tree, newdata = Xtrain)
+RMSE(pred = pred, obs = Ytrain)
 
 ```
 
 
 ##RANDOM FORESTS
-```{r}
-# library(rsample)      # data splitting 
-# library(randomForest) # basic implementation
-# pacman::p_load(ranger)       # a faster implementation of randomForest
-# pacman::p_load(caret)        # an aggregator package for performing many machine learning models
-# pacman::p_load(h2o)          # an extremely fast java-based platform
-# 
-# set.seed(1989)
-# final_split1 <- initial_split(Data, prop = .7)
-# final_train1 <- training(final_split1)
-# final_test1  <- testing(final_split1)
-
-```
 
 ```{r}
 
@@ -412,60 +369,22 @@ m1
 
 
 which.min(m1$mse)
-## [1] 344
+
 
 # RMSE of this optimal random forest
 sqrt(m1$mse[which.min(m1$mse)])
 
 ```
 
-```{r}
-# create training and validation data 
-set.seed(1989)
-valid_split <- initial_split(final_train1, .8)
-
-# training data
-final_train1_v2 <- analysis(valid_split)
-
-# validation data
-final1_valid <- assessment(valid_split)
-x_test <- final1_valid[setdiff(names(final1_valid), "price")]
-y_test <- final1_valid$price
-
-rf_oob_comp <- randomForest(
-  formula = price ~ .,
-  data    = final_train1_v2,
-  xtest   = x_test,
-  ytest   = y_test
-)
-
-# extract OOB & validation errors
-oob <- sqrt(rf_oob_comp$mse)
-validation <- sqrt(rf_oob_comp$test$mse)
-
-# compare error rates
-tibble::tibble(
-  `Out of Bag Error` = oob,
-  `Test error` = validation,
-  ntrees = 1:rf_oob_comp$ntree
-) %>%
-  gather(Metric, RMSE, -ntrees) %>%
-  ggplot(aes(ntrees, RMSE, color = Metric)) +
-  geom_line() +
-  scale_y_continuous(labels = scales::dollar) +
-  xlab("Number of trees")
-
-
-```
 
 ```{r}
-features <- setdiff(names(final_train1), "price")
+features <- setdiff(names(Xtrain), Ytrain)
 
 set.seed(1989)
 
 m2 <- tuneRF(
-  x          = final_train1[features],
-  y          = final_train1$price,
+  x          = Xtrain,
+  y          = Ytrain,
   ntreeTry   = 500,
   mtryStart  = 5,
   stepFactor = 1.5,
