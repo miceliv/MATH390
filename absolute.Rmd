@@ -81,7 +81,7 @@ d %<>%
 
 #Added latitude and longitude features using ggmap
 
-```{r}
+```{r error = TRUE}
 #Already run and included in the data
 #pacman::p_load(ggmap)
 #d %<>%
@@ -148,42 +148,32 @@ train_indices = sample(1 : nrow(real_d), nrow(real_d)*4/5)
 training_data = real_d[train_indices, ]
 testing_data = real_d[-train_indices, ]
 
-#testing_data %<>%
-#  mutate(sale_price = NA)
-
-
 X = rbind(training_data, testing_data, fake_d)
-
-
-table(X$total_taxes)
 ```
 
-Let's first create a matrix with $p$ columns that represents missingness
+#Let's first create a matrix with $p$ columns that represents missingness
 
 ```{r}
 M = tbl_df(apply(is.na(X), 2, as.numeric))
 colnames(M) = paste("is_missing_", colnames(X), sep = "")
-head(M)
-summary(M)
 
 ```
 
-Some of these missing indicators are collinear because they share all the rows they are missing on. Let's filter those out:
+#Some of these missing indicators are collinear because they share all the rows they are missing on. Let's filter those out:
 
 ```{r}
 M = tbl_df(t(unique(t(M))))
 ```
 
 
-Some featuers did not have missingness so let's remove them:
+#Some featuers did not have missingness so let's remove them:
 
 ```{r}
 M %<>% select_if(function(x){sum(x) > 0})
-head(M)
-dim(M)
-colSums(M)
 
 ```
+
+Now let's impute using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
 
 ```{r}
 pacman::p_load(missForest)
@@ -195,19 +185,12 @@ Ximp = missForest(data.frame(X), sampsize = rep(172, ncol(X)))$ximp
 Ximp %<>%
   arrange(id)
 
-Ximp
-real_y
-
 Xnew = data.frame(cbind(Ximp, M, real_y))
-
-Xnew
 
 Xnew %<>%
   mutate(price = d.sale_price) %>%
   select(-c(id, d.id, d.sale_price))
   
-
-Xnew
 linear_mod_impute_and_missing_dummies = lm(price ~ ., data = Xnew)
 summary(linear_mod_impute_and_missing_dummies)
 
@@ -238,7 +221,15 @@ dtrain = cbind(Xtrain, Ytrain) ## combine x train with y train, x test with y te
 dtest = cbind(Xtest, Ytest)
 ```
 
+## Dropping colinear features
+
+```{r}
+Xtrain %<>%
+  select(-c(is_missing_num_total_rooms, is_missing_num_bedrooms, is_missing_price_persqft))
+```
+
 Linear Regression
+
 
 ```{r}
 linear = lm(Ytrain ~ ., data = Xtrain)## simple linear model
@@ -247,11 +238,12 @@ summary(linear)
 
 
 ```{r}
+
 yhat = predict(linear, Xtest)
 
 e = yhat - Ytest
 
-sqrt(sum(e^2) / 108)
+sqrt(sum(e^2) / nrow(Xtest))
 
 ```
 
@@ -264,13 +256,7 @@ pacman::p_load(rpart.plot) #ploting reg tree
 pacman::p_load(ipred) #bagging
 pacman::p_load(caret) #bagging
 
-Data$listing_price_to_nearest_1000 = NULL
-Data$is_missing_listing_price_to_nearest_1000 = NULL
 
-set.seed(1989)
-final_split1 <- initial_split(Data, prop = .7)
-final_train1 <- training(final_split1)
-final_test1  <- testing(final_split1)
 
 m1 = rpart(
   formula = Ytrain ~ .,
@@ -310,15 +296,10 @@ jpeg(file = "save_m2.jpeg")
 
  
 ```{r}
-m1$cptable
-
-
-```
 ###Tuning
-```{r}
 m3 <- rpart(
-    formula = price ~ .,
-    data    = final_train1,
+    formula = Ytrain ~ .,
+    data    = Xtrain,
     method  = "anova", 
     control = list(minsplit = 10, maxdepth = 12, xval = 10)
 )
@@ -331,36 +312,7 @@ sqrt(sum(e^2)/106)
 m3$cptable
 
 ```
- 
-```{r}
-hyper_grid <- expand.grid(
-  minsplit = seq(5, 20, 1),
-  maxdepth = seq(8, 15, 1)
-)
 
-head(hyper_grid)
-nrow(hyper_grid)
-
-```
-
-```{r}
-models <- list()
-
-for (i in 1:nrow(hyper_grid)) {
-  
-  # get minsplit, maxdepth values at row i
-  minsplit <- hyper_grid$minsplit[i]
-  maxdepth <- hyper_grid$maxdepth[i]
-
-  # train a model and store in the list
-  models[[i]] <- rpart(
-    formula = price ~ .,
-    data    = final_train1,
-    method  = "anova",
-    control = list(minsplit = minsplit, maxdepth = maxdepth)
-    )
-}
-```
 
 ```{r}
 # function to get optimal cp
@@ -374,45 +326,23 @@ get_min_error <- function(x) {
   min    <- which.min(x$cptable[, "xerror"])
   xerror <- x$cptable[min, "xerror"] 
 }
-
-hyper_grid %>%
-  mutate(
-    cp    = purrr::map_dbl(models, get_cp),
-    error = purrr::map_dbl(models, get_min_error)
-    ) %>%
-  arrange(error) %>%
-  top_n(-5, wt = error)
-
 ```
 
 ```{r}
 optimal_tree <- rpart(
-    formula = price ~ .,
-    data    = final_train1,
+    formula = Ytrain ~ .,
+    data    = Xtrain,
     method  = "anova",
     control = list(minsplit = 11, maxdepth = 8, cp = 0.01)
     )
 
-pred <- predict(optimal_tree, newdata = final_test1)
-RMSE(pred = pred, obs = final_test1$price)
+pred <- predict(optimal_tree, newdata = Xtrain)
+RMSE(pred = pred, obs = Ytrain)
 
 ```
 
 
 ##RANDOM FORESTS
-```{r}
-# library(rsample)      # data splitting 
-# library(randomForest) # basic implementation
-# pacman::p_load(ranger)       # a faster implementation of randomForest
-# pacman::p_load(caret)        # an aggregator package for performing many machine learning models
-# pacman::p_load(h2o)          # an extremely fast java-based platform
-# 
-# set.seed(1989)
-# final_split1 <- initial_split(Data, prop = .7)
-# final_train1 <- training(final_split1)
-# final_test1  <- testing(final_split1)
-
-```
 
 ```{r}
 
@@ -425,60 +355,22 @@ m1
 
 
 which.min(m1$mse)
-## [1] 344
+
 
 # RMSE of this optimal random forest
 sqrt(m1$mse[which.min(m1$mse)])
 
 ```
 
-```{r}
-# create training and validation data 
-set.seed(1989)
-valid_split <- initial_split(final_train1, .8)
-
-# training data
-final_train1_v2 <- analysis(valid_split)
-
-# validation data
-final1_valid <- assessment(valid_split)
-x_test <- final1_valid[setdiff(names(final1_valid), "price")]
-y_test <- final1_valid$price
-
-rf_oob_comp <- randomForest(
-  formula = price ~ .,
-  data    = final_train1_v2,
-  xtest   = x_test,
-  ytest   = y_test
-)
-
-# extract OOB & validation errors
-oob <- sqrt(rf_oob_comp$mse)
-validation <- sqrt(rf_oob_comp$test$mse)
-
-# compare error rates
-tibble::tibble(
-  `Out of Bag Error` = oob,
-  `Test error` = validation,
-  ntrees = 1:rf_oob_comp$ntree
-) %>%
-  gather(Metric, RMSE, -ntrees) %>%
-  ggplot(aes(ntrees, RMSE, color = Metric)) +
-  geom_line() +
-  scale_y_continuous(labels = scales::dollar) +
-  xlab("Number of trees")
-
-
-```
 
 ```{r}
-features <- setdiff(names(final_train1), "price")
+features <- setdiff(names(Xtrain), Ytrain)
 
 set.seed(1989)
 
 m2 <- tuneRF(
-  x          = final_train1[features],
-  y          = final_train1$price,
+  x          = Xtrain,
+  y          = Ytrain,
   ntreeTry   = 500,
   mtryStart  = 5,
   stepFactor = 1.5,
@@ -489,33 +381,4 @@ m2 <- tuneRF(
 
 ```
 
-```{r}
-
-
-
-
-# randomForest speed
-system.time(
-  ames_randomForest <- randomForest(
-    formula = price ~ ., 
-    data    = final_train1, 
-    ntree   = 500,
-    mtry    = floor(length(features) / 3)
-  )
-)
-##    user  system elapsed 
-##  55.371   0.590  57.364
-
-# ranger speed
-system.time(
-  ames_ranger <- ranger(
-    formula   = Sale_Price ~ ., 
-    data      = ames_train, 
-    num.trees = 500,
-    mtry      = floor(length(features) / 3)
-  )
-)
-
-
-```
 
