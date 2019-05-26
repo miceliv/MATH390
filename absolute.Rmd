@@ -81,14 +81,14 @@ d %<>%
 
 #Added latitude and longitude features using ggmap
 
-```{r}
+```{r error = TRUE}
 #Already run and included in the data
 #pacman::p_load(ggmap)
 #d %<>%
 #  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = #geocode(full_address_or_zip_code)$lon )
 #geocoordinates for relevant LIRR stations
 
-lirr_coord = read.csv("coord.csv")
+lirr_coord = coord
 RAD_EARTH = 3958.8
 degrees_to_radians = function(angle_degrees){
   for(i in 1:length(angle_degrees))
@@ -151,7 +151,7 @@ testing_data = real_d[-train_indices, ]
 X = rbind(training_data, testing_data, fake_d)
 ```
 
-Let's first create a matrix with $p$ columns that represents missingness
+#Let's first create a matrix with $p$ columns that represents missingness
 
 ```{r}
 M = tbl_df(apply(is.na(X), 2, as.numeric))
@@ -159,14 +159,14 @@ colnames(M) = paste("is_missing_", colnames(X), sep = "")
 
 ```
 
-Some of these missing indicators are collinear because they share all the rows they are missing on. Let's filter those out:
+#Some of these missing indicators are collinear because they share all the rows they are missing on. Let's filter those out:
 
 ```{r}
 M = tbl_df(t(unique(t(M))))
 ```
 
 
-Some featuers did not have missingness so let's remove them:
+#Some featuers did not have missingness so let's remove them:
 
 ```{r}
 M %<>% select_if(function(x){sum(x) > 0})
@@ -221,7 +221,15 @@ dtrain = cbind(Xtrain, Ytrain) ## combine x train with y train, x test with y te
 dtest = cbind(Xtest, Ytest)
 ```
 
+## Dropping colinear features
+
+```{r}
+Xtrain %<>%
+  select(-c(is_missing_num_total_rooms, is_missing_num_bedrooms, is_missing_price_persqft))
+```
+
 Linear Regression
+
 
 ```{r}
 linear = lm(Ytrain ~ ., data = Xtrain)## simple linear model
@@ -230,11 +238,12 @@ summary(linear)
 
 
 ```{r}
+
 yhat = predict(linear, Xtest)
 
 e = yhat - Ytest
 
-sqrt(sum(e^2) / 108)
+sqrt(sum(e^2) / nrow(Xtest))
 
 ```
 
@@ -247,17 +256,8 @@ pacman::p_load(rpart.plot) #ploting reg tree
 pacman::p_load(ipred) #bagging
 pacman::p_load(caret) #bagging
 
-Data$listing_price_to_nearest_1000 = NULL
-Data$is_missing_listing_price_to_nearest_1000 = NULL
-
-set.seed(1989)
-final_split1 <- initial_split(Data, prop = .7)
-final_train1 <- training(final_split1)
-final_test1  <- testing(final_split1)
-```
 
 
-```{r}
 m1 = rpart(
   formula = Ytrain ~ .,
   data    = Xtrain,
@@ -296,12 +296,7 @@ jpeg(file = "save_m2.jpeg")
 
  
 ```{r}
-m1$cptable
-
-
-```
-###Tunig
-```{r}
+###Tuning
 m3 <- rpart(
     formula = Ytrain ~ .,
     data    = Xtrain,
@@ -331,15 +326,6 @@ get_min_error <- function(x) {
   min    <- which.min(x$cptable[, "xerror"])
   xerror <- x$cptable[min, "xerror"] 
 }
-
-hyper_grid %>%
-  mutate(
-    cp    = purrr::map_dbl(models, get_cp),
-    error = purrr::map_dbl(models, get_min_error)
-    ) %>%
-  arrange(error) %>%
-  top_n(-5, wt = error)
-
 ```
 
 ```{r}
