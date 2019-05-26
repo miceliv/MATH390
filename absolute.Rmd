@@ -185,8 +185,6 @@ colSums(M)
 
 ```
 
-Now let's impute using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
-
 ```{r}
 pacman::p_load(missForest)
 Ximp = missForest(data.frame(X), sampsize = rep(172, ncol(X)))$ximp
@@ -316,7 +314,7 @@ m1$cptable
 
 
 ```
-###Tunig
+###Tuning
 ```{r}
 m3 <- rpart(
     formula = price ~ .,
