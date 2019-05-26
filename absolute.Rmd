@@ -1,7 +1,9 @@
 ---
-Author: "Juan D Astudillo, Vincent Miceli, Adriana Sham, Burhan Hanif, Sakib Salim" 
 title: "Term Project 390.4- 2019"
-output: pdf_document
+output:
+  word_document: default
+  pdf_document: default
+Author: Juan D Astudillo, Vincent Miceli, Adriana Sham, Burhan Hanif, Sakib Salim
 ---
 
 ## R Markdown
@@ -86,37 +88,37 @@ d %<>%
 #  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = #geocode(full_address_or_zip_code)$lon )
 #geocoordinates for relevant LIRR stations
 
-lirr_coord = coord
-RAD_EARTH = 3958.8
-degrees_to_radians = function(angle_degrees){
-  for(i in 1:length(angle_degrees))
-    angle_degrees[i] = angle_degrees[i]*pi/180
-  return(angle_degrees)
-}
-compute_globe_distance = function(destination, origin){
-  destination_rad = degrees_to_radians(destination)
-  origin_rad = degrees_to_radians(origin)
-  delta_lat = destination_rad[1] - origin_rad[1]
-  delta_lon = destination_rad[2] - origin_rad[2]
-  h = (sin(delta_lat/2))^2 + cos(origin_rad[1]) * cos(destination_rad[1]) * (sin(delta_lon/2))^2
-  central_angle = 2 * asin(sqrt(h))
-  return(RAD_EARTH * central_angle)
-}
-#find the closest LIRR station and compute distance
-shortest_lirr_distance = function(all_lirr_coords, house_coords){
-  shortest_dist = Inf
-  for (i in 1: nrow(all_lirr_coords)){
-    ith_lirr = c(all_lirr_coords$lat[i], all_lirr_coords$lon[i])
-    new_dist = compute_globe_distance(ith_lirr, house_coords)
-    if( new_dist < shortest_dist){
-      shortest_dist = new_dist
-    }
-  }
-  return(shortest_dist)
-}
-d %<>%
-  rowwise() %>%
-  mutate(shortest_dist = shortest_lirr_distance(lirr_coord, c(lat, lon)) )
+#lirr_coord = coord
+# RAD_EARTH = 3958.8
+# degrees_to_radians = function(angle_degrees){
+#   for(i in 1:length(angle_degrees))
+#     angle_degrees[i] = angle_degrees[i]*pi/180
+#   return(angle_degrees)
+# }
+# compute_globe_distance = function(destination, origin){
+#   destination_rad = degrees_to_radians(destination)
+#   origin_rad = degrees_to_radians(origin)
+#   delta_lat = destination_rad[1] - origin_rad[1]
+#   delta_lon = destination_rad[2] - origin_rad[2]
+#   h = (sin(delta_lat/2))^2 + cos(origin_rad[1]) * cos(destination_rad[1]) * (sin(delta_lon/2))^2
+#   central_angle = 2 * asin(sqrt(h))
+#   return(RAD_EARTH * central_angle)
+# }
+# #find the closest LIRR station and compute distance
+# shortest_lirr_distance = function(all_lirr_coords, house_coords){
+#   shortest_dist = Inf
+#   for (i in 1: nrow(all_lirr_coords)){
+#     ith_lirr = c(all_lirr_coords$lat[i], all_lirr_coords$lon[i])
+#     new_dist = compute_globe_distance(ith_lirr, house_coords)
+#     if( new_dist < shortest_dist){
+#       shortest_dist = new_dist
+#     }
+#   }
+#   return(shortest_dist)
+#}
+# d %<>%
+#   rowwise() %>%
+#   mutate(shortest_dist = shortest_lirr_distance(lirr_coord, c(lat, lon)) )
 #makes any other addresses redundant
 d %<>%
   select(-c(zip_code, full_address_or_zip_code, listing_price_to_nearest_1000))
@@ -151,9 +153,6 @@ testing_data = real_d[-train_indices, ]
 
 
 X = rbind(training_data, testing_data, fake_d)
-
-
-table(X$total_taxes)
 ```
 
 Let's first create a matrix with $p$ columns that represents missingness
@@ -161,8 +160,6 @@ Let's first create a matrix with $p$ columns that represents missingness
 ```{r}
 M = tbl_df(apply(is.na(X), 2, as.numeric))
 colnames(M) = paste("is_missing_", colnames(X), sep = "")
-head(M)
-summary(M)
 
 ```
 
@@ -177,9 +174,6 @@ Some featuers did not have missingness so let's remove them:
 
 ```{r}
 M %<>% select_if(function(x){sum(x) > 0})
-head(M)
-dim(M)
-colSums(M)
 
 ```
 
@@ -195,19 +189,12 @@ Ximp = missForest(data.frame(X), sampsize = rep(172, ncol(X)))$ximp
 Ximp %<>%
   arrange(id)
 
-Ximp
-real_y
-
 Xnew = data.frame(cbind(Ximp, M, real_y))
-
-Xnew
 
 Xnew %<>%
   mutate(price = d.sale_price) %>%
   select(-c(id, d.id, d.sale_price))
   
-
-Xnew
 linear_mod_impute_and_missing_dummies = lm(price ~ ., data = Xnew)
 summary(linear_mod_impute_and_missing_dummies)
 
@@ -317,8 +304,8 @@ m1$cptable
 ###Tunig
 ```{r}
 m3 <- rpart(
-    formula = price ~ .,
-    data    = final_train1,
+    formula = Ytrain ~ .,
+    data    = Xtrain,
     method  = "anova", 
     control = list(minsplit = 10, maxdepth = 12, xval = 10)
 )
@@ -354,8 +341,8 @@ for (i in 1:nrow(hyper_grid)) {
 
   # train a model and store in the list
   models[[i]] <- rpart(
-    formula = price ~ .,
-    data    = final_train1,
+    formula = Ytrain ~ .,
+    data    = Xtrain,
     method  = "anova",
     control = list(minsplit = minsplit, maxdepth = maxdepth)
     )
@@ -387,8 +374,8 @@ hyper_grid %>%
 
 ```{r}
 optimal_tree <- rpart(
-    formula = price ~ .,
-    data    = final_train1,
+    formula = Xtrain ~ .,
+    data    = Ytrain,
     method  = "anova",
     control = list(minsplit = 11, maxdepth = 8, cp = 0.01)
     )
@@ -489,33 +476,4 @@ m2 <- tuneRF(
 
 ```
 
-```{r}
-
-
-
-
-# randomForest speed
-system.time(
-  ames_randomForest <- randomForest(
-    formula = price ~ ., 
-    data    = final_train1, 
-    ntree   = 500,
-    mtry    = floor(length(features) / 3)
-  )
-)
-##    user  system elapsed 
-##  55.371   0.590  57.364
-
-# ranger speed
-system.time(
-  ames_ranger <- ranger(
-    formula   = Sale_Price ~ ., 
-    data      = ames_train, 
-    num.trees = 500,
-    mtry      = floor(length(features) / 3)
-  )
-)
-
-
-```
 
