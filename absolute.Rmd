@@ -88,7 +88,7 @@ d %<>%
 #  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = #geocode(full_address_or_zip_code)$lon )
 #geocoordinates for relevant LIRR stations
 
-lirr_coord = coord
+lirr_coord = read.csv("coord.csv")
 RAD_EARTH = 3958.8
 degrees_to_radians = function(angle_degrees){
   for(i in 1:length(angle_degrees))
