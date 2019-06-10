@@ -1,7 +1,6 @@
 ---
 title: "Term Project 390.4- 2019"
 output:
-  word_document: default
   pdf_document: default
 Author: Juan D Astudillo, Vincent Miceli, Adriana Sham, Burhan Hanif, Sakib Salim
 ---
@@ -13,7 +12,7 @@ pacman::p_load(dplyr, tidyr, ggplot2, magrittr, stringr, mlr)
 housing_data = read.csv("housing_data_2016_2017.csv")
 ```
 
-##Delete variables that we dont need
+##Delete features that are irrelevant to sale price
 ```{r}
 housing_data %<>%
   select(-c(HITId, HITTypeId, Title, Description, Keywords, Reward, CreationTime, MaxAssignments,	RequesterAnnotation,	AssignmentDurationInSeconds,	AutoApprovalDelayInSeconds,	Expiration,	NumberOfSimilarHITs, LifetimeInSeconds,	AssignmentId,	WorkerId,	AssignmentStatus,	AcceptTime,	SubmitTime,	AutoApprovalTime,	ApprovalTime,	RejectionTime,	RequesterFeedback,	WorkTimeInSeconds, LifetimeApprovalRate,	Last30DaysApprovalRate,	Last7DaysApprovalRate, URL, url, date_of_sale))
@@ -46,7 +45,7 @@ d %<>%
 d %<>%
   mutate(monthly_cost = sjmisc::rec(monthly_cost, rec = "0 = NA ; else = copy"))
 
-## Garage exists conver it to binary
+## convert garage_exists feature to binary
 
 d %<>%
   mutate(garage_exists = sjmisc::rec(garage_exists, rec = "NA = 0 ; else = copy")) ##recode from NA to 0. 
@@ -62,7 +61,7 @@ str(d)
 
 ```
 
-##Change variable type 
+##Change variable types 
 ```{r}
 d %<>%
   mutate( dining_room_type = as.factor(dining_room_type)) %>%
@@ -173,7 +172,7 @@ M %<>% select_if(function(x){sum(x) > 0})
 
 ```
 
-Now let's impute using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
+#Now let's impute missing data using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
 
 ```{r}
 pacman::p_load(missForest)
@@ -342,7 +341,7 @@ RMSE(pred = pred, obs = Ytrain)
 ```
 
 
-##RANDOM FORESTS
+##RANDOM FOREST
 
 ```{r}
 
@@ -380,5 +379,4 @@ m2 <- tuneRF(
 
 
 ```
-
 
