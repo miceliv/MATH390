@@ -1,0 +1,463 @@
+---
+title: "Term Project 390.4- 2019"
+output:
+  pdf_document: default
+Author: Juan D Astudillo, Vincent Miceli, Adriana Sham, Burhan Hanif, Sakib Salim
+---
+
+## Introduction
+
+For this real-estate price prediction project, our team was given a dataset scraped from zillow.com that included features of apartment/condo listings such as the number of bedrooms, the square footage, the address, and some less relevant information.  We were tasked with cleaning this dataset, which had many missing values, and building the most accurate machine learning model possible from it.
+
+```{r}
+pacman::p_load(dplyr, tidyr, ggplot2, magrittr, stringr, mlr)
+housing_data = read.csv("housing_data_2016_2017.csv")
+```
+
+###Delete features that are irrelevant to sale price
+
+From a quick look we identified many features that were going to be irrelevant to the model so we removed them from the start.  Listing price was removed because we believed that would be an unfair feature if we're looking to build a model to value properties.  The model could be used to get an idea of a fair listing price for a property. 
+
+```{r}
+housing_data <- housing_data[29:57] %>%
+  select(-c(date_of_sale, model_type, listing_price_to_nearest_1000, url))
+```
+
+## Cleaning the Data
+
+In this block of code we cleaned the addresses of the listings, converted some features to binary variables, and performed other general cleaning of the dataset.
+
+```{r}
+housing_data %<>%
+  mutate( zip_code = str_extract(full_address_or_zip_code, "[0-9]{5}")) %>%
+  mutate(dogs_allowed = ifelse(substr(housing_data$dogs_allowed, 1, 3) == "yes", 1, 0)) %>%
+  mutate(cats_allowed = ifelse(substr(housing_data$cats_allowed, 1, 3) == "yes", 1, 0)) %>%
+  mutate(coop = as.integer(coop_condo == 'co-op')) %>%
+  mutate(condo = as.integer(coop_condo == 'condo')) %>%
+  select(-coop_condo)
+
+d = housing_data
+d %<>%
+  mutate(maintenance_cost = sjmisc::rec(maintenance_cost, rec = "NA = 0 ; else = copy")) %<>%
+  mutate(common_charges = sjmisc::rec(common_charges, rec = "NA = 0 ; else = copy"))##recode from NA to 0.
+# combine maintaince cost and common charges
+d %<>% 
+  mutate( monthly_cost = common_charges + maintenance_cost)
+d %<>%
+  mutate(monthly_cost = sjmisc::rec(monthly_cost, rec = "0 = NA ; else = copy"))
+## convert garage_exists feature to binary
+d %<>%
+  mutate(garage_exists = sjmisc::rec(garage_exists, rec = "NA = 0 ; else = copy")) ##recode from NA to 0. 
+d %<>%
+  mutate(garage_exists = sjmisc::rec(garage_exists, rec = " eys = 1; UG = 1 ; Underground = 1; yes = 1 ; Yes = 1 ; else = copy")) ##recode from NA to 0.
+d %<>%
+  select(-c(maintenance_cost , common_charges))
+```
+
+## Added latitude and longitude features using ggmap
+
+We had the idea that latitudes and longitudes would be a better measure of location than zip codes or addresses, so we engineered those features using ggmap.  We could then remove the original location related features.
+
+```{r error = TRUE}
+#Already run and included in the data
+#pacman::p_load(ggmap)
+#d %<>%
+#  mutate(lat = geocode(full_address_or_zip_code)$lat, lon = #geocode(full_address_or_zip_code)$lon )
+#geocoordinates for relevant LIRR stations
+lirr_coord = read.csv("coord.csv")
+RAD_EARTH = 3958.8
+degrees_to_radians = function(angle_degrees){
+  for(i in 1:length(angle_degrees))
+    angle_degrees[i] = angle_degrees[i]*pi/180
+  return(angle_degrees)
+}
+compute_globe_distance = function(destination, origin){
+  destination_rad = degrees_to_radians(destination)
+  origin_rad = degrees_to_radians(origin)
+  delta_lat = destination_rad[1] - origin_rad[1]
+  delta_lon = destination_rad[2] - origin_rad[2]
+  h = (sin(delta_lat/2))^2 + cos(origin_rad[1]) * cos(destination_rad[1]) * (sin(delta_lon/2))^2
+  central_angle = 2 * asin(sqrt(h))
+  return(RAD_EARTH * central_angle)
+}
+#find the closest LIRR station and compute distance
+shortest_lirr_distance = function(all_lirr_coords, house_coords){
+  shortest_dist = Inf
+  for (i in 1: nrow(all_lirr_coords)){
+    ith_lirr = c(all_lirr_coords$lat[i], all_lirr_coords$lon[i])
+    new_dist = compute_globe_distance(ith_lirr, house_coords)
+    if( new_dist < shortest_dist){
+      shortest_dist = new_dist
+    }
+  }
+  return(shortest_dist)
+}
+d %<>%
+  rowwise() %>%
+  mutate(shortest_dist = shortest_lirr_distance(lirr_coord, c(lat, lon)) ) %>%
+  select(-c(zip_code, full_address_or_zip_code, community_district_num))
+
+str(d)
+```
+
+From an overview we identified features that needed the variable types to be changed
+
+```{r}
+d$garage_exists = as.character(d$garage_exists)
+d$garage_exists = as.numeric(d$garage_exists)
+d$parking_charges = as.character(d$parking_charges) 
+d$parking_charges = as.numeric(d$parking_charges)
+d$sale_price = as.character(d$sale_price)
+d$sale_price = as.numeric(d$sale_price)
+d$total_taxes = as.character(d$total_taxes) 
+d$total_taxes = as.numeric(d$total_taxes)
+
+str(d)
+```
+
+## Exploratory Data Analysis
+
+We now may be able to convert the entire dataset to numeric, so that it will perform better with regression models.  We will examine the remaining categorical variables as the first step in our exploratory data analysis.
+
+```{r}
+table(d$dining_room_type, useNA = 'always')
+```
+
+We can combine dining area, none, and the NAs into the other category.
+
+```{r}
+other <- d %>%
+  filter(is.na(dining_room_type) | dining_room_type == 'none' | dining_room_type == 'dining area' | dining_room_type == 'other') %>%
+  mutate(dining_room_type = "other")
+
+non_na <- d %>%
+  filter(dining_room_type == 'combo' | dining_room_type == 'formal')
+
+d <- rbind(other, non_na)
+d$dining_room_type <- as.factor(d$dining_room_type)
+```
+
+```{r}
+table(d$fuel_type, useNA = 'always')
+```
+
+We can do a similar process for fuel type that we did for dining room type, compressing the number of categories.
+
+```{r}
+other <- d %>%
+  filter(is.na(fuel_type) | fuel_type == 'none' | fuel_type == 'other' | fuel_type == 'Other') %>%
+  mutate(fuel_type = "other")
+
+non_na <- d %>%
+  filter(fuel_type == 'electric' | fuel_type == 'gas' | fuel_type == 'oil')
+
+d <- rbind(other, non_na)
+d$fuel_type <- as.factor(d$fuel_type)
+```
+
+```{r}
+table(d$kitchen_type, useNA = 'always')
+```
+
+We are going to assume a combo kitchen and an eat in kitchen are one in the same, and will go with the mode for missing values (combo)
+
+```{r}
+combo <- d %>%
+  filter(is.na(kitchen_type) | kitchen_type == 'none' | kitchen_type == 'combo' | kitchen_type == 'eat in') %>%
+  mutate(kitchen_type = 'combo')
+
+efficiency <- d %>%
+  filter(kitchen_type == 'efficiency')
+
+d <- rbind(combo, efficiency)
+d$kitchen_type <- as.factor(d$kitchen_type)
+```
+
+Now to convert the categorical variables to dummy variables, and combine them to the dataset:
+
+```{r}
+d <- cbind(model.matrix( ~ dining_room_type - 1, d), model.matrix( ~ fuel_type - 1, d), model.matrix( ~ kitchen_type - 1, d), d)
+
+d %<>%
+  select(-c(dining_room_type, fuel_type, kitchen_type))
+```
+
+Now we will take a look at the missingness of the remaining features
+
+```{r}
+cols <- colnames(d)
+for (i in 1:length(d)) {
+  cat(cols[i])
+  cat('\n')
+  cat(sum(is.na(d[i])))
+  cat('\n')
+}
+```
+
+A quick overview of the missingness in the dataset showed us a few things.  A majority of the sale_price feature, our target variable, was missing.  These rows can still be useful though for imputation of the other missing values.  There was a very high amount of missing values in the parking_charges, pct_tax_deductibl, and num_half_bathrooms, and we decided these features were not extremely important to the model, so we went ahead and removed those.  
+
+```{r}
+d %<>%
+  select(-c(parking_charges, pct_tax_deductibl, num_half_bathrooms))
+```
+
+There is also a significant amount of missing values in the total taxes column, so we may be able to handle that manually as well.
+
+```{r}
+table(d$total_taxes)
+```
+
+Aside from the missing values, there are many values that are impossible/incorrect as they are much too low to make sense.  We decided to handle those manually by replacing them with the mean. 
+
+```{r}
+d %<>%
+  mutate(total_taxes = ifelse(total_taxes < 1000, mean(d$total_taxes), total_taxes))
+```
+
+To handle the remaining missing values, we believe the best method is to use missForest to impute them, essentially predicting what the missing values probably would be or would be close to based on other features of the row. Before we do that though, we need to make sure we remember which rows did not have a value in sale price.
+
+```{r}
+d %<>%
+  mutate(sale_miss = ifelse(is.na(sale_price), 1, 0))
+```
+
+
+```{r}
+pacman::p_load(missForest)
+df <- d
+
+df_imp = missForest(df, sampsize = rep(172, ncol(df)))$ximp
+```
+
+
+*********************************************************************************************************************************************
+
+
+
+
+```{r}
+cols <- colnames(df_imp)
+for (i in 1:length(df_imp)) {
+  cat(cols[i])
+  cat('\n')
+  cat(sum(is.na(df_imp[i])))
+  cat('\n')
+}
+```
+
+
+
+We are trying to predict `sale_price`. So let's section our dataset:
+
+```{r}
+####CREATE A COLUMN ID
+d %<>%
+  ungroup(d) %>%
+  mutate(id = 1 : 2230)
+real_y = data.frame(d$id, d$sale_price)
+real_d = subset(d, (!is.na(d$sale_price)))
+fake_d = subset(d, (is.na(d$sale_price)))
+real_d$sale_price = NULL
+fake_d$sale_price = NULL
+```
+#Split the data that has y into train and test sets
+
+```{r}
+train_indices = sample(1 : nrow(real_d), nrow(real_d)*4/5)
+training_data = real_d[train_indices, ]
+testing_data = real_d[-train_indices, ]
+X = rbind(training_data, testing_data, fake_d)
+```
+
+#Let's first create a matrix with $p$ columns that represents missingness
+
+```{r}
+M = tbl_df(apply(is.na(X), 2, as.numeric))
+colnames(M) = paste("is_missing_", colnames(X), sep = "")
+```
+
+#Some of these missing indicators are collinear because they share all the rows they are missing on. Let's filter those out:
+
+```{r}
+M = tbl_df(t(unique(t(M))))
+```
+
+
+#Some featuers did not have any missing values so let's remove them:
+
+```{r}
+M %<>% select_if(function(x){sum(x) > 0})
+```
+
+#Now let's impute missing data using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
+
+```{r}
+pacman::p_load(missForest)
+x <- data.frame(X)
+
+str(x)
+
+Ximp = missForest(X, sampsize = rep(172, ncol(X)))$ximp
+
+?missForest
+```
+
+```{r}
+str(X)
+```
+
+
+```{r}
+Ximp %<>%
+  arrange(id)
+Xnew = data.frame(cbind(Ximp, M, real_y))
+Xnew %<>%
+  mutate(price = d.sale_price) %>%
+  select(-c(id, d.id, d.sale_price))
+  
+linear_mod_impute_and_missing_dummies = lm(price ~ ., data = Xnew)
+summary(linear_mod_impute_and_missing_dummies)
+```
+
+
+### REMOVING MISSING Y SECTION
+```{r}
+Data = Xnew
+### sale price is our imputed Y
+Y = Data$price
+Data %<>%
+  filter(!is.na(price)) %>%
+  select(-price)
+Xtrain = Data[1:422, ]
+Xtest = Data[423:528, ]
+Ytrain = Y[1:422]
+Ytest = Y[423:528]
+dtrain = cbind(Xtrain, Ytrain) ## combine x train with y train, x test with y test
+dtest = cbind(Xtest, Ytest)
+```
+
+## Dropping colinear features
+
+```{r}
+Xtrain %<>%
+  select(-c(is_missing_num_total_rooms, is_missing_num_bedrooms, is_missing_price_persqft))
+```
+
+Linear Regression
+
+
+```{r}
+linear = lm(Ytrain ~ ., data = Xtrain)## simple linear model
+summary(linear)
+```
+
+
+```{r}
+yhat = predict(linear, Xtest)
+e = yhat - Ytest
+sqrt(sum(e^2) / nrow(Xtest))
+```
+
+```{r}
+#REGRESSION TREE
+pacman::p_load(rsample)#data spliting
+pacman::p_load(rpart) #performing reg tree
+pacman::p_load(rpart.plot) #ploting reg tree
+pacman::p_load(ipred) #bagging
+pacman::p_load(caret) #bagging
+m1 = rpart(
+  formula = Ytrain ~ .,
+  data    = Xtrain,
+  method  = "anova"
+  )
+rpart.plot(m1)
+plotcp(m1)
+summary(m1)
+yhat = predict(m1, Xtest)
+e = yhat - Ytest
+sqrt(sum(e^2)/106)
+```
+ 
+```{r}
+m2 <- rpart(
+    formula = Ytrain ~ .,
+    data    = Xtrain,
+    method  = "anova", 
+    control = list(cp = 0, xval = 10)
+)
+rpart.plot(m2)
+plotcp(m2)
+yhat = predict(m2, Xtest)
+e = yhat - Ytest
+sqrt(sum(e^2)/106)
+jpeg(file = "save_m2.jpeg")
+```
+
+ 
+```{r}
+###Tuning
+m3 <- rpart(
+    formula = Ytrain ~ .,
+    data    = Xtrain,
+    method  = "anova", 
+    control = list(minsplit = 10, maxdepth = 12, xval = 10)
+)
+yhat = predict(m3, Xtest)
+e = yhat - Ytest
+sqrt(sum(e^2)/106)
+m3$cptable
+```
+
+
+```{r}
+# function to get optimal cp
+get_cp <- function(x) {
+  min    <- which.min(x$cptable[, "xerror"])
+  cp <- x$cptable[min, "CP"] 
+}
+# function to get minimum error
+get_min_error <- function(x) {
+  min    <- which.min(x$cptable[, "xerror"])
+  xerror <- x$cptable[min, "xerror"] 
+}
+```
+
+```{r}
+optimal_tree <- rpart(
+    formula = Ytrain ~ .,
+    data    = Xtrain,
+    method  = "anova",
+    control = list(minsplit = 11, maxdepth = 8, cp = 0.01)
+    )
+pred <- predict(optimal_tree, newdata = Xtrain)
+RMSE(pred = pred, obs = Ytrain)
+```
+
+
+##RANDOM FOREST
+
+```{r}
+m1 <- randomForest(
+  formula = Ytrain ~ .,
+  data    = Xtrain
+)
+m1
+which.min(m1$mse)
+# RMSE of this optimal random forest
+sqrt(m1$mse[which.min(m1$mse)])
+```
+
+
+```{r}
+features <- setdiff(names(Xtrain), Ytrain)
+set.seed(1989)
+m2 <- tuneRF(
+  x          = Xtrain,
+  y          = Ytrain,
+  ntreeTry   = 500,
+  mtryStart  = 5,
+  stepFactor = 1.5,
+  improve    = 0.01,
+  trace      = FALSE      # to not show real-time progress 
+)
+```
