@@ -104,13 +104,14 @@ From an overview we identified features that needed the variable types to be cha
 
 ```{r}
 d$garage_exists = as.character(d$garage_exists)
-d$garage_exists = as.numeric(d$garage_exists)
+d$garage_exists = as.integer(d$garage_exists)
 d$parking_charges = as.character(d$parking_charges) 
 d$parking_charges = as.numeric(d$parking_charges)
 d$sale_price = as.character(d$sale_price)
 d$sale_price = as.numeric(d$sale_price)
 d$total_taxes = as.character(d$total_taxes) 
 d$total_taxes = as.numeric(d$total_taxes)
+
 
 str(d)
 ```
@@ -214,6 +215,11 @@ d %<>%
   mutate(total_taxes = ifelse(total_taxes < 1000, mean(d$total_taxes), total_taxes))
 ```
 
+
+```{r}
+str(d)
+```
+
 To handle the remaining missing values, we believe the best method is to use missForest to impute them, essentially predicting what the missing values probably would be or would be close to based on other features of the row. Before we do that though, we need to make sure we remember which rows did not have a value in sale price.
 
 ```{r}
@@ -226,221 +232,79 @@ d %<>%
 pacman::p_load(missForest)
 df <- d
 
-df_imp = missForest(df, sampsize = rep(172, ncol(df)))$ximp
+?missForest
+df_imp = missForest(df, ntree = 500,)$ximp
 ```
 
+All the missing values have now been imputed, so we can now remove the section of the dataset where sale_price was missing
+
+```{r}
+df <- df_imp %>%
+  filter(sale_miss == 0) %>%
+  select(-sale_miss)
+```
+
+## Regression
+
+```{r}
+summary(lm(sale_price ~ ., df))
+```
+
+A simple linear model is able to predict the sale_price with an R-squared of .824.  At first glance, it appears the number of bedrooms, the number of floors in the building, the location, the total taxes, the monthly costs, and whether it is a coop or condo seem to be the best predictors.
+
+```{r}
+summary(lm(sale_price ~ . * ., df))
+```
+
+If we include all the original features as well as first order interactions, our in-sample R-squared jumps to .957.  Let's see how they perform-out-of-sample.
+
+```{r}
+##Train-Test Split
+pacman::p_load(caTools)
+set.seed(777)
+spl = sample.split(df$sale_price, 0.75)
+train = subset(df, spl == TRUE)
+test = subset(df, spl == FALSE)
+```
+
+```{r}
+simple <- lm(sale_price ~ ., train)
+yhat <- predict(simple, test)
+
+rsq <- function (preds, actual) {
+  rss <- sum((preds - actual) ^ 2)  ## residual sum of squares
+  tss <- sum((actual - mean(actual)) ^ 2)  ## total sum of squares
+  r2 <- 1 - rss/tss
+  r2
+}
+
+rsq(yhat, test$sale_price)
+```
+
+The simple linear model has an out-of-sample R-squared of .81. Not bad for a very small dataset!
+
+```{r}
+associations <- lm(sale_price ~ . * ., train)
+yhat <- predict(associations, test)
+
+rsq(yhat, test$sale_price)
+```
+
+So we can see including all associations overfits the model, as we saw a drop in the out-of-sample R-squared. Maybe including some of the associations would have a use in forward step-wise regression though.
 
 *********************************************************************************************************************************************
 
-
-
-
 ```{r}
-cols <- colnames(df_imp)
-for (i in 1:length(df_imp)) {
-  cat(cols[i])
-  cat('\n')
-  cat(sum(is.na(df_imp[i])))
-  cat('\n')
-}
-```
-
-
-
-We are trying to predict `sale_price`. So let's section our dataset:
-
-```{r}
-####CREATE A COLUMN ID
-d %<>%
-  ungroup(d) %>%
-  mutate(id = 1 : 2230)
-real_y = data.frame(d$id, d$sale_price)
-real_d = subset(d, (!is.na(d$sale_price)))
-fake_d = subset(d, (is.na(d$sale_price)))
-real_d$sale_price = NULL
-fake_d$sale_price = NULL
-```
-#Split the data that has y into train and test sets
-
-```{r}
-train_indices = sample(1 : nrow(real_d), nrow(real_d)*4/5)
-training_data = real_d[train_indices, ]
-testing_data = real_d[-train_indices, ]
-X = rbind(training_data, testing_data, fake_d)
-```
-
-#Let's first create a matrix with $p$ columns that represents missingness
-
-```{r}
-M = tbl_df(apply(is.na(X), 2, as.numeric))
-colnames(M) = paste("is_missing_", colnames(X), sep = "")
-```
-
-#Some of these missing indicators are collinear because they share all the rows they are missing on. Let's filter those out:
-
-```{r}
-M = tbl_df(t(unique(t(M))))
-```
-
-
-#Some featuers did not have any missing values so let's remove them:
-
-```{r}
-M %<>% select_if(function(x){sum(x) > 0})
-```
-
-#Now let's impute missing data using the package. we cannot fit RF models to the entire dataset (it's 26,000! observations) so we will sample 5 for X1 and  for each of the trees and then average. That will be good enough.
-
-```{r}
-pacman::p_load(missForest)
-x <- data.frame(X)
-
-str(x)
-
-Ximp = missForest(X, sampsize = rep(172, ncol(X)))$ximp
-
-?missForest
-```
-
-```{r}
-str(X)
-```
-
-
-```{r}
-Ximp %<>%
-  arrange(id)
-Xnew = data.frame(cbind(Ximp, M, real_y))
-Xnew %<>%
-  mutate(price = d.sale_price) %>%
-  select(-c(id, d.id, d.sale_price))
-  
-linear_mod_impute_and_missing_dummies = lm(price ~ ., data = Xnew)
-summary(linear_mod_impute_and_missing_dummies)
-```
-
-
-### REMOVING MISSING Y SECTION
-```{r}
-Data = Xnew
-### sale price is our imputed Y
-Y = Data$price
-Data %<>%
-  filter(!is.na(price)) %>%
-  select(-price)
-Xtrain = Data[1:422, ]
-Xtest = Data[423:528, ]
-Ytrain = Y[1:422]
-Ytest = Y[423:528]
-dtrain = cbind(Xtrain, Ytrain) ## combine x train with y train, x test with y test
-dtest = cbind(Xtest, Ytest)
-```
-
-## Dropping colinear features
-
-```{r}
-Xtrain %<>%
-  select(-c(is_missing_num_total_rooms, is_missing_num_bedrooms, is_missing_price_persqft))
-```
-
-Linear Regression
-
-
-```{r}
-linear = lm(Ytrain ~ ., data = Xtrain)## simple linear model
-summary(linear)
-```
-
-
-```{r}
-yhat = predict(linear, Xtest)
-e = yhat - Ytest
-sqrt(sum(e^2) / nrow(Xtest))
-```
-
-```{r}
-#REGRESSION TREE
-pacman::p_load(rsample)#data spliting
-pacman::p_load(rpart) #performing reg tree
-pacman::p_load(rpart.plot) #ploting reg tree
-pacman::p_load(ipred) #bagging
-pacman::p_load(caret) #bagging
-m1 = rpart(
-  formula = Ytrain ~ .,
-  data    = Xtrain,
-  method  = "anova"
-  )
-rpart.plot(m1)
-plotcp(m1)
-summary(m1)
-yhat = predict(m1, Xtest)
-e = yhat - Ytest
-sqrt(sum(e^2)/106)
-```
- 
-```{r}
-m2 <- rpart(
-    formula = Ytrain ~ .,
-    data    = Xtrain,
-    method  = "anova", 
-    control = list(cp = 0, xval = 10)
-)
-rpart.plot(m2)
-plotcp(m2)
-yhat = predict(m2, Xtest)
-e = yhat - Ytest
-sqrt(sum(e^2)/106)
-jpeg(file = "save_m2.jpeg")
-```
-
- 
-```{r}
-###Tuning
-m3 <- rpart(
-    formula = Ytrain ~ .,
-    data    = Xtrain,
-    method  = "anova", 
-    control = list(minsplit = 10, maxdepth = 12, xval = 10)
-)
-yhat = predict(m3, Xtest)
-e = yhat - Ytest
-sqrt(sum(e^2)/106)
-m3$cptable
-```
-
-
-```{r}
-# function to get optimal cp
-get_cp <- function(x) {
-  min    <- which.min(x$cptable[, "xerror"])
-  cp <- x$cptable[min, "CP"] 
-}
-# function to get minimum error
-get_min_error <- function(x) {
-  min    <- which.min(x$cptable[, "xerror"])
-  xerror <- x$cptable[min, "xerror"] 
-}
-```
-
-```{r}
-optimal_tree <- rpart(
-    formula = Ytrain ~ .,
-    data    = Xtrain,
-    method  = "anova",
-    control = list(minsplit = 11, maxdepth = 8, cp = 0.01)
-    )
-pred <- predict(optimal_tree, newdata = Xtrain)
-RMSE(pred = pred, obs = Ytrain)
+pacman::p_load(olsrr)
+fitAll <- lm(sale_price ~ . * ., df)
+fwdFit <- ols_step_forward_p(fitAll, penter = .5)
 ```
 
 
 ##RANDOM FOREST
 
 ```{r}
-m1 <- randomForest(
-  formula = Ytrain ~ .,
-  data    = Xtrain
-)
+m1 <- randomForest(formula = sale_price ~ ., train)
 m1
 which.min(m1$mse)
 # RMSE of this optimal random forest
