@@ -1,6 +1,8 @@
 ---
 title: "Term Project 390.4- 2019"
 output:
+  html_document:
+    df_print: paged
   pdf_document: default
 Author: Juan D Astudillo, Vincent Miceli, Adriana Sham, Burhan Hanif, Sakib Salim
 ---
@@ -24,8 +26,8 @@ housing_data <- housing_data[29:57] %>%
 ```
 
 ## Cleaning the Data
-
 In this block of code we cleaned the addresses of the listings, converted some features to binary variables, and performed other general cleaning of the dataset.
+
 
 ```{r}
 housing_data %<>%
@@ -56,7 +58,7 @@ d %<>%
 
 ## Added latitude and longitude features using ggmap
 
-We had the idea that latitudes and longitudes would be a better measure of location than zip codes or addresses, so we engineered those features using ggmap.  We could then remove the original location related features.
+We had the idea that latitudes and longitudes would be a better measure of location than zip codes or addresses, so we engineered those features using ggmap.  We could then remove the original location related features.  We also engineered a feature that calculates the distance from each coop/condo to the nearest LIRR station, as properties nearest to LIRR stations might be more desirable to those working in Manhattan.
 
 ```{r error = TRUE}
 #Already run and included in the data
@@ -220,23 +222,21 @@ d %<>%
 str(d)
 ```
 
-To handle the remaining missing values, we believe the best method is to use missForest to impute them, essentially predicting what the missing values probably would be or would be close to based on other features of the row. Before we do that though, we need to make sure we remember which rows did not have a value in sale price.
+To handle the remaining missing values, we believe the best method is to use missForest to impute them, essentially predicting what the missing values probably would be or would be close to based on other features of the row. Before we do that though, we need to make sure we remember which rows did not have a value in sale price as those data points should not be used for the model.
 
 ```{r}
-d %<>%
+df <- d %>%
   mutate(sale_miss = ifelse(is.na(sale_price), 1, 0))
 ```
 
 
 ```{r}
 pacman::p_load(missForest)
-df <- d
 
-?missForest
-df_imp = missForest(df, ntree = 500,)$ximp
+df_imp = missForest(df, ntree = 300,)$ximp
 ```
 
-All the missing values have now been imputed, so we can now remove the section of the dataset where sale_price was missing
+All the missing values have now been imputed, so we can now remove the section of the dataset where sale_price was missing.  
 
 ```{r}
 df <- df_imp %>%
@@ -250,18 +250,12 @@ df <- df_imp %>%
 summary(lm(sale_price ~ ., df))
 ```
 
-A simple linear model is able to predict the sale_price with an R-squared of .824.  At first glance, it appears the number of bedrooms, the number of floors in the building, the location, the total taxes, the monthly costs, and whether it is a coop or condo seem to be the best predictors.
-
-```{r}
-summary(lm(sale_price ~ . * ., df))
-```
-
-If we include all the original features as well as first order interactions, our in-sample R-squared jumps to .957.  Let's see how they perform-out-of-sample.
+A simple linear model is able to predict the sale_price with an R-squared of .824. Let's see how this model performs out-of-sample.
 
 ```{r}
 ##Train-Test Split
 pacman::p_load(caTools)
-set.seed(777)
+set.seed(77)
 spl = sample.split(df$sale_price, 0.75)
 train = subset(df, spl == TRUE)
 test = subset(df, spl == FALSE)
@@ -281,47 +275,97 @@ rsq <- function (preds, actual) {
 rsq(yhat, test$sale_price)
 ```
 
-The simple linear model has an out-of-sample R-squared of .81. Not bad for a very small dataset!
-
-```{r}
-associations <- lm(sale_price ~ . * ., train)
-yhat <- predict(associations, test)
-
-rsq(yhat, test$sale_price)
-```
-
-So we can see including all associations overfits the model, as we saw a drop in the out-of-sample R-squared. Maybe including some of the associations would have a use in forward step-wise regression though.
-
-*********************************************************************************************************************************************
+The simple linear model has an out-of-sample R-squared of .69, which is to be expected from a simple model from such a small dataset.  Let's see what we can do with forward step-wise regression to select the best predictors based on p-value.
 
 ```{r}
 pacman::p_load(olsrr)
-fitAll <- lm(sale_price ~ . * ., df)
-fwdFit <- ols_step_forward_p(fitAll, penter = .5)
+forward <- ols_step_forward_p(simple, penter = .05, details = FALSE, progress = TRUE)
 ```
 
+
+```{r}
+yhat <- predict(forward$model, test)
+rsq(yhat, test$sale_price)
+```
+
+Using only the best 10 predictors, we had essentially the same R-squared from our model.  Let's see what we can do if we include these 10 predictors, as well as associations between them.
+
+```{r}
+top10 <- forward$predictors
+f <- df %>%
+  select(top10, sale_price)
+
+set.seed(777)
+spl = sample.split(f$sale_price, 0.75)
+ftrain = subset(f, spl == TRUE)
+ftest = subset(f, spl == FALSE)
+
+associations <- lm(sale_price ~ . * ., ftrain)
+forward <- ols_step_forward_p(associations, penter = .025, details = FALSE, progress = TRUE)
+```
+
+```{r}
+yhat <- predict(forward$model, ftest)
+rsq(yhat, ftest$sale_price)
+```
+
+That's a significant improvement, the out-of-sample R-squared jumped to .79 with this method. Just to check let's see how this method would work if we trained on the whole dataset (including the imputed sale_price points).
+
+```{r}
+f <- df_imp %>%
+  select(top10, sale_price)
+
+set.seed(77)
+spl = sample.split(f$sale_price, 0.75)
+ftrain = subset(f, spl == TRUE)
+ftest = subset(f, spl == FALSE)
+
+associations <- lm(sale_price ~ . * ., ftrain)
+forward <- ols_step_forward_p(associations, penter = .005, details = FALSE, progress = TRUE)
+```
+
+```{r}
+yhat <- predict(forward$model, test)
+rsq(yhat, test$sale_price)
+```
+
+Even though this model was trained on essentially fake data, it still performed very well when predicting on the real data points.  This shows that this method at least has promise if we are able to scrape more data points that include the sale_price.
 
 ##RANDOM FOREST
 
+Let's see how a random forest regression model performs with our real dataset. 
+
 ```{r}
-m1 <- randomForest(formula = sale_price ~ ., train)
-m1
-which.min(m1$mse)
-# RMSE of this optimal random forest
-sqrt(m1$mse[which.min(m1$mse)])
+pacman::p_load(randomForest)
+rf <- randomForest(sale_price ~ ., train, mtry=3, ntree = 500, importance=TRUE)
+
+
+yhat <- predict(rf, test)
+rsq(yhat, test$sale_price)
 ```
 
+The random forest regressor model had an R-squared of .89 out-of-sample, a huge improvement over the simple linear model.  This is also a very acceptable R-squared in general, considering we only had 528 data points.  Let's take a look at how a sample tree functioned in our random forest:
 
 ```{r}
-features <- setdiff(names(Xtrain), Ytrain)
-set.seed(1989)
-m2 <- tuneRF(
-  x          = Xtrain,
-  y          = Ytrain,
-  ntreeTry   = 500,
-  mtryStart  = 5,
-  stepFactor = 1.5,
-  improve    = 0.01,
-  trace      = FALSE      # to not show real-time progress 
+pacman::p_load(rpart, rpart.plot)
+tree <- rpart(
+    formula = sale_price ~ .,
+    data    = df,
+    method  = "anova"
 )
+
+rpart.plot(tree)
 ```
+
+What if we trained the random forest on the larger dataset:
+
+```{r}
+rf <- randomForest(sale_price ~ ., ftrain, ntry = 3, ntree = 500, importance = TRUE)
+
+yhat <- predict(rf, test)
+rsq(yhat, test$sale_price)
+```
+
+## Conclusion
+
+An amazing .96 R-squared using the larger dataset to train the model, then predicting on the real data points.  There is definitely some over fitting going on when we train on the larger dataset though, because those missing sale prices were generated by the rest of the dataset's information.  It would definitely be interesting though to try these models on a larger, real dataset.
